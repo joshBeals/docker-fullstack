@@ -1,46 +1,48 @@
-name: Deploy Frontend
+name: Docker CI/CD
 
-on: 
+on:
   push:
+    branches:
+      - main
+  pull_request:
     branches:
       - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
-      - run: docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
-      - run: docker build -t joshbeals/react-test -f ./client/Dockerfile.dev ./client
-      - run: docker run -e CI=true joshbeals/react-test npm test
+      # Checkout the code
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: Generate deployment package
-        run: zip -r deploy.zip . -x '*.git*'
+      # Set up Docker
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v2
 
-      - name: Deploy to EB
-        uses: einaregilsson/beanstalk-deploy@v21
-        with:
-          aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
-          aws_secret_key: ${{ secrets.AWS_SECRET_KEY }}
-          application_name: frontend
-          environment_name: Frontend-env
-          existing_bucket_name: elasticbeanstalk-us-east-2-654654478160
-          region: us-east-2
-          version_label: ${{ github.sha }}
-          deployment_package: deploy.zip
+      # Log in to Docker Hub
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_ID }}" --password-stdin
 
-sudo: required
-services:
-  - docker
+      # Build and test the React client
+      - name: Build and test React client
+        run: docker build -t joshbeals/react-test -f ./client/Dockerfile.dev ./client
+      - name: Run React tests
+        run: docker run -e CI=true joshbeals/react-test npm test
 
-before_install:
-  - docker build -t joshbeals/react-test -f ./client/Dockerfile.dev ./client
-  
-script:
-  - docker run joshbeals/react-test npm test -- --coverage
+      # Build Docker images
+      - name: Build Docker images
+        run: |
+          docker build -t joshbeals/multi-client ./client
+          docker build -t joshbeals/multi-nginx ./nginx
+          docker build -t joshbeals/multi-server ./server
+          docker build -t joshbeals/multi-worker ./worker
 
-after_success:
-  - docker build -t joshbeals/multi-client ./client
-  - docker build -t joshbeals/multi-nginx ./nginx
-  - docker build -t joshbeals/multi-server ./server
-  - docker build -t joshbeals/multi-worker ./worker
+      # Push Docker images
+      - name: Push Docker images
+        run: |
+          docker push joshbeals/multi-client
+          docker push joshbeals/multi-nginx
+          docker push joshbeals/multi-server
+          docker push joshbeals/multi-worker
